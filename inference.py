@@ -20,6 +20,7 @@ def warmup_model():
     pipe = DiffusionPipeline.from_pretrained(
         settings.MODEL_ID,
         torch_dtype=torch.bfloat16,
+        trust_remote_code=True,
     )
 
     pipe.to("cuda")
@@ -34,7 +35,7 @@ def warmup_model():
     except Exception:
         pass
 
-    print("Model loaded successfully")
+    print("FLUX.2 Klein 4B loaded successfully")
 
     return pipe
 
@@ -49,7 +50,6 @@ def generate_image(
     guidance_scale: float = 3.5,
     seed: Optional[int] = None,
 ):
-
     global pipe
 
     if pipe is None:
@@ -58,7 +58,9 @@ def generate_image(
     generator = None
 
     if seed is not None:
-        generator = torch.Generator(device="cuda").manual_seed(seed)
+        generator = torch.Generator(
+            device="cuda"
+        ).manual_seed(seed)
 
     result = pipe(
         prompt=prompt,
