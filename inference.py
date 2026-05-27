@@ -1,49 +1,66 @@
-# inference.py
 import torch
-from diffusers import StableDiffusionPipeline
-import base64
-import io
-from PIL import Image
-import random
+from diffusers import DiffusionPipeline
 
-# Load your model globally
-model = None
+pipe = None
+
 
 def warmup_model():
-    global model
-    if model is None:
-        model = StableDiffusionPipeline.from_pretrained(
-            "path_to_your_model_or_hf_id",
-            torch_dtype=torch.float16
-        ).to("cuda")
-        # Optional: generate a tiny image to initialize everything
-        _ = model("warmup", num_inference_steps=1)
+    global pipe
 
-def generate_image(prompt, negative_prompt=None, width=512, height=512, steps=20,
-                   guidance_scale=7.5, seed=None, num_images=1):
-    global model
-    if model is None:
+    if pipe is not None:
+        return
+
+    print("Loading FLUX.2 Klein 4B model...")
+
+    pipe = DiffusionPipeline.from_pretrained(
+        "black-forest-labs/FLUX.2-Klein-4B",
+        torch_dtype=torch.bfloat16
+    )
+
+    pipe.enable_model_cpu_offload()
+
+    print("Model loaded successfully!")
+
+
+def generate_image(
+    prompt,
+    width=1024,
+    height=1024,
+    num_inference_steps=28,
+    guidance_scale=3.5,
+    seed=None,
+    negative_prompt=None
+):
+    global pipe
+
+    if pipe is None:
         warmup_model()
 
-    seed_used = seed or random.randint(0, 2**32-1)
-    generator = torch.Generator("cuda").manual_seed(seed_used)
+    generator = None
+    if seed is not None:
+        generator = torch.Generator("cpu").manual_seed(seed)
 
-    outputs = []
-    for _ in range(num_images):
-        image = model(
-            prompt=prompt,
-            negative_prompt=negative_prompt,
-            width=width,
-            height=height,
-            num_inference_steps=steps,
-            guidance_scale=guidance_scale,
-            generator=generator
-        ).images[0]
-        
-        # Convert to Base64 for API response
-        buffered = io.BytesIO()
-        image.save(buffered, format="PNG")
-        img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
-        outputs.append(img_str)
+    kwargs = {
+        "prompt": prompt,
+        "width": width,
+        "height": height,
+        "num_inference_steps": num_inference_steps,
+        "guidance_scale": guidance_scale,
+        "generator": generator,
+    }
 
-    return outputs, seed_used
+    # FLUX models may not support negative prompt
+    # so only send it if available
+    if negative_prompt:
+        try:
+            result = pipe(
+                **kwargs,
+                negative_prompt=negative_prompt
+            )
+        except TypeError:
+            result = pipe(**kwargs)
+    else:
+        result = pipe(**kwargs)
+
+    image = result.images[0]
+    return image
