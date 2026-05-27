@@ -1,48 +1,18 @@
-# Git
-.git
-.gitignore
-
-# Python
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
-*.so
-*.egg-info/
-
-# Virtual env
+*.db
+*.sqlite3
+.env
 venv/
 .venv/
-env/
-
-# Local env
-.env
-
-# IDE
-.vscode/
-.idea/
-
-# Logs
-*.log
-
-# Notebook
-.ipynb_checkpoints/
-
-# Local caches
-hf_cache/
-torch_cache/
-
-# Outputs
-outputs/
-generated/
-*.png
-*.jpg
-*.jpeg
-*.webp
-
-# Build
-build/
-dist/
-
-# Docs
+.git/
+.gitignore
 README.md
+.idea/
+.vscode/
+*.log
+.cache/
+huggingface/
+tmp/
