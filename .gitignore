@@ -1,0 +1,43 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+*.egg-info/
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# Environment variables
+.env
+
+# IDE
+.vscode/
+.idea/
+
+# Logs
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# HuggingFace / Torch cache
+hf_cache/
+torch_cache/
+
+# Generated outputs
+outputs/
+generated/
+*.png
+*.jpg
+*.jpeg
+*.webp
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Build
+build/
+dist/
