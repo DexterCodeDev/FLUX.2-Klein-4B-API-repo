@@ -18,11 +18,15 @@ COPY requirements.txt .
 
 RUN pip3 install --upgrade pip
 
+# Install matching CUDA Torch build
 RUN pip3 install --no-cache-dir \
-    --index-url https://download.pytorch.org/whl/cu124 \
-    torch torchvision
+    torch==2.5.1 \
+    torchvision==0.20.1 \
+    --index-url https://download.pytorch.org/whl/cu124
 
-RUN pip3 install --no-cache-dir -r requirements.txt
+# Install app deps
+RUN pip3 install --no-cache-dir \
+    -r requirements.txt
 
 COPY . .
 
