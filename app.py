@@ -1,61 +1,149 @@
-# app.py
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
-from typing import List, Optional
-from inference import generate_image, warmup_model
+import os
+import io
 import time
+import threading
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import JSONResponse, StreamingResponse
+from pydantic import BaseModel
 
-app = FastAPI(title="FLUX.2 Klein 4B API", version="1.0.0")
+from inference import generate_image, warmup_model
 
-# Warmup the model on start
+app = FastAPI(title="FLUX.2 Klein 4B API")
+
+# -----------------------------
+# Global model loading state
+# -----------------------------
+model_ready = False
+model_loading = False
+
+
+# -----------------------------
+# Request schema
+# -----------------------------
+class GenerateRequest(BaseModel):
+    prompt: str
+    negative_prompt: str | None = None
+    width: int = 1024
+    height: int = 1024
+    num_inference_steps: int = 28
+    guidance_scale: float = 3.5
+    seed: int | None = None
+    response_format: str = "png"  # png or base64
+
+
+# -----------------------------
+# Background model loading
+# -----------------------------
+def load_model():
+    global model_ready, model_loading
+
+    try:
+        print("Loading FLUX.2 Klein 4B model...")
+        warmup_model()
+        model_ready = True
+        print("Model loaded successfully!")
+    except Exception as e:
+        print(f"Model loading failed: {e}")
+    finally:
+        model_loading = False
+
+
+# -----------------------------
+# Startup event
+# -----------------------------
 @app.on_event("startup")
 async def startup_event():
-    warmup_model()
+    global model_loading
 
-# Request schema for full-feature API
-class ImageGenerationRequest(BaseModel):
-    prompt: str
-    negative_prompt: Optional[str] = None
-    width: Optional[int] = 512
-    height: Optional[int] = 512
-    steps: Optional[int] = 20
-    guidance_scale: Optional[float] = 7.5
-    seed: Optional[int] = None
-    num_images: Optional[int] = 1
+    if not model_loading:
+        model_loading = True
 
-# Response schema
-class ImageGenerationResponse(BaseModel):
-    status: str
-    generation_time: float
-    seed: int
-    images: List[str]  # Base64 strings
+        # Start model loading in background
+        thread = threading.Thread(target=load_model)
+        thread.daemon = True
+        thread.start()
 
-@app.post("/generate", response_model=ImageGenerationResponse)
-async def generate(request: ImageGenerationRequest):
-    start_time = time.time()
-    try:
-        images, seed_used = generate_image(
-            prompt=request.prompt,
-            negative_prompt=request.negative_prompt,
-            width=request.width,
-            height=request.height,
-            steps=request.steps,
-            guidance_scale=request.guidance_scale,
-            seed=request.seed,
-            num_images=request.num_images
-        )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-    
-    generation_time = time.time() - start_time
-    return ImageGenerationResponse(
-        status="success",
-        generation_time=generation_time,
-        seed=seed_used,
-        images=images
-    )
 
-# Health check
+# -----------------------------
+# Health route
+# -----------------------------
+@app.get("/")
+async def root():
+    return {"status": "ok"}
+
+
 @app.get("/health")
 async def health():
-    return {"status": "ok"}
+    return {
+        "status": "ok",
+        "model_ready": model_ready,
+        "model_loading": model_loading
+    }
+
+
+# -----------------------------
+# Generate image endpoint
+# -----------------------------
+@app.post("/generate")
+async def generate(req: GenerateRequest):
+    global model_ready
+
+    start = time.time()
+
+    # Wait for model if still loading
+    wait_seconds = 0
+    while not model_ready:
+        time.sleep(2)
+        wait_seconds += 2
+
+        if wait_seconds > 1800:
+            raise HTTPException(
+                status_code=503,
+                detail="Model is still loading. Try again later."
+            )
+
+    try:
+        image = generate_image(
+            prompt=req.prompt,
+            negative_prompt=req.negative_prompt,
+            width=req.width,
+            height=req.height,
+            num_inference_steps=req.num_inference_steps,
+            guidance_scale=req.guidance_scale,
+            seed=req.seed
+        )
+
+        inference_time = round(time.time() - start, 2)
+
+        img_io = io.BytesIO()
+        image.save(img_io, format="PNG")
+        img_io.seek(0)
+
+        headers = {
+            "X-Inference-Time": str(inference_time)
+        }
+
+        return StreamingResponse(
+            img_io,
+            media_type="image/png",
+            headers=headers
+        )
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# -----------------------------
+# Run locally / Cloud Run
+# -----------------------------
+if __name__ == "__main__":
+    import uvicorn
+
+    port = int(os.environ.get("PORT", 8080))
+
+    uvicorn.run(
+        "app:app",
+        host="0.0.0.0",
+        port=port,
+        workers=1
+    )
