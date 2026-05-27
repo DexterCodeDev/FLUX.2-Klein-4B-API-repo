@@ -1,7 +1,10 @@
 import torch
-from diffusers import DiffusionPipeline
+from diffusers import Flux2KleinPipeline
 
 pipe = None
+
+device = "cuda"
+dtype = torch.bfloat16
 
 
 def warmup_model():
@@ -12,9 +15,9 @@ def warmup_model():
 
     print("Loading FLUX.2 Klein 4B model...")
 
-    pipe = DiffusionPipeline.from_pretrained(
-        "black-forest-labs/FLUX.2-Klein-4B",
-        torch_dtype=torch.bfloat16
+    pipe = Flux2KleinPipeline.from_pretrained(
+        "black-forest-labs/FLUX.2-klein-base-4B",
+        torch_dtype=dtype
     )
 
     pipe.enable_model_cpu_offload()
@@ -27,7 +30,7 @@ def generate_image(
     width=1024,
     height=1024,
     num_inference_steps=28,
-    guidance_scale=3.5,
+    guidance_scale=4.0,
     seed=None,
     negative_prompt=None
 ):
@@ -38,29 +41,15 @@ def generate_image(
 
     generator = None
     if seed is not None:
-        generator = torch.Generator("cpu").manual_seed(seed)
+        generator = torch.Generator(device=device).manual_seed(seed)
 
-    kwargs = {
-        "prompt": prompt,
-        "width": width,
-        "height": height,
-        "num_inference_steps": num_inference_steps,
-        "guidance_scale": guidance_scale,
-        "generator": generator,
-    }
+    result = pipe(
+        prompt=prompt,
+        width=width,
+        height=height,
+        guidance_scale=guidance_scale,
+        num_inference_steps=num_inference_steps,
+        generator=generator
+    )
 
-    # FLUX models may not support negative prompt
-    # so only send it if available
-    if negative_prompt:
-        try:
-            result = pipe(
-                **kwargs,
-                negative_prompt=negative_prompt
-            )
-        except TypeError:
-            result = pipe(**kwargs)
-    else:
-        result = pipe(**kwargs)
-
-    image = result.images[0]
-    return image
+    return result.images[0]
