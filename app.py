@@ -97,7 +97,7 @@ async def lifespan(app: FastAPI):
             pass
 
         try:
-            pipe.enable_xformers_memory_efficient_attention()
+            pipe.enable_attention_slicing()
         except Exception:
             pass
 
