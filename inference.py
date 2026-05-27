@@ -1,80 +1,48 @@
-import gc
-from typing import Optional
-
 import torch
 from diffusers import DiffusionPipeline
-
 from config import settings
 
+# Global model variable
 pipe = None
 
 
-def warmup_model():
+def get_model():
     global pipe
 
-    if pipe is not None:
-        return pipe
+    # Load only once (lazy loading)
+    if pipe is None:
+        print("Loading FLUX.2 Klein 4B model...")
 
-    print("Loading FLUX.2 Klein 4B model...")
+        device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    pipe = DiffusionPipeline.from_pretrained(
-        settings.MODEL_ID,
-        torch_dtype=torch.bfloat16,
-        trust_remote_code=True,
-    )
+        pipe = DiffusionPipeline.from_pretrained(
+            settings.MODEL_ID,
+            torch_dtype=torch.bfloat16 if device == "cuda" else torch.float32
+        )
 
-    pipe.to("cuda")
+        pipe.to(device)
 
-    try:
-        pipe.enable_attention_slicing()
-    except Exception:
-        pass
-
-    try:
-        pipe.enable_vae_slicing()
-    except Exception:
-        pass
-
-    print("FLUX.2 Klein 4B loaded successfully")
+        print("Model loaded successfully")
 
     return pipe
 
 
-@torch.inference_mode()
-def generate_image(
-    prompt: str,
-    negative_prompt: str = "",
-    width: int = 1024,
-    height: int = 1024,
-    steps: int = 4,
-    guidance_scale: float = 3.5,
-    seed: Optional[int] = None,
-):
-    global pipe
+def generate_image(prompt: str):
+    """
+    Generate image from prompt
+    """
+    pipe = get_model()
 
-    if pipe is None:
-        warmup_model()
-
-    generator = None
-
-    if seed is not None:
-        generator = torch.Generator(
-            device="cuda"
-        ).manual_seed(seed)
-
-    result = pipe(
-        prompt=prompt,
-        negative_prompt=negative_prompt,
-        width=width,
-        height=height,
-        guidance_scale=guidance_scale,
-        num_inference_steps=steps,
-        generator=generator,
-    )
-
-    image = result.images[0]
-
-    torch.cuda.empty_cache()
-    gc.collect()
+    image = pipe(
+        prompt=prompt
+    ).images[0]
 
     return image
+
+
+def warmup_model():
+    """
+    No-op to prevent startup loading.
+    Keeps compatibility if app.py still imports it.
+    """
+    pass
