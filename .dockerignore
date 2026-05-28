@@ -1,8 +1,10 @@
-.git
-.gitignore
 __pycache__
 *.pyc
-.env
 venv
-.cache
+.venv
+.git
+.gitignore
+.dockerignore
+.vscode
+.idea
 README.md
