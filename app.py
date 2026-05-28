@@ -1,3 +1,4 @@
+```python
 import os
 import io
 import base64
@@ -9,13 +10,21 @@ from pydantic import BaseModel
 from PIL import Image
 from diffusers import DiffusionPipeline
 
+# -----------------------------
+# Config
+# -----------------------------
+
 MODEL_ID = "black-forest-labs/FLUX.2-klein-4B"
 HF_TOKEN = os.getenv("HF_TOKEN")
 
-app = FastAPI(title="FLUX 2 Klein API")
+app = FastAPI(title="FLUX.2 Klein API")
 
 pipe = None
 
+
+# -----------------------------
+# Model Loader
+# -----------------------------
 
 def load_model():
     global pipe
@@ -33,21 +42,23 @@ def load_model():
 
     pipe.to("cuda")
 
-    try:
-        pipe.enable_model_cpu_offload()
-    except Exception:
-        pass
+    # Reduce VRAM spikes
+    pipe.enable_attention_slicing()
 
     print("Model loaded successfully.")
 
     return pipe
 
 
+# -----------------------------
+# Request Models
+# -----------------------------
+
 class Txt2ImgRequest(BaseModel):
     prompt: str
     negative_prompt: Optional[str] = ""
     width: Optional[int] = 768
-    height: Optional[int] = 768
+    height: Optional[int] = 1024
     num_inference_steps: Optional[int] = 28
     guidance_scale: Optional[float] = 3.5
     seed: Optional[int] = None
@@ -56,19 +67,27 @@ class Txt2ImgRequest(BaseModel):
 class Img2ImgRequest(BaseModel):
     prompt: str
     image_base64: str
-    strength: Optional[float] = 0.7
+    strength: Optional[float] = 0.75
     width: Optional[int] = 768
-    height: Optional[int] = 768
+    height: Optional[int] = 1024
     num_inference_steps: Optional[int] = 28
     guidance_scale: Optional[float] = 3.5
     seed: Optional[int] = None
 
 
+# -----------------------------
+# Utilities
+# -----------------------------
+
 def pil_to_base64(image):
     buffer = io.BytesIO()
     image.save(buffer, format="PNG")
-    return base64.b64encode(buffer.getvalue()).decode()
+    return base64.b64encode(buffer.getvalue()).decode("utf-8")
 
+
+# -----------------------------
+# Routes
+# -----------------------------
 
 @app.get("/")
 async def root():
@@ -86,7 +105,9 @@ async def txt2img(request: Txt2ImgRequest):
 
     generator = None
     if request.seed is not None:
-        generator = torch.Generator("cuda").manual_seed(request.seed)
+        generator = torch.Generator("cuda").manual_seed(
+            request.seed
+        )
 
     result = pipe(
         prompt=request.prompt,
@@ -98,9 +119,14 @@ async def txt2img(request: Txt2ImgRequest):
         generator=generator,
     )
 
-    images = [pil_to_base64(img) for img in result.images]
+    images = [
+        pil_to_base64(img)
+        for img in result.images
+    ]
 
-    return {"images": images}
+    return {
+        "images": images
+    }
 
 
 @app.post("/img2img")
@@ -108,12 +134,18 @@ async def img2img(request: Img2ImgRequest):
     pipe = load_model()
 
     image = Image.open(
-        io.BytesIO(base64.b64decode(request.image_base64))
+        io.BytesIO(
+            base64.b64decode(
+                request.image_base64
+            )
+        )
     ).convert("RGB")
 
     generator = None
     if request.seed is not None:
-        generator = torch.Generator("cuda").manual_seed(request.seed)
+        generator = torch.Generator("cuda").manual_seed(
+            request.seed
+        )
 
     result = pipe(
         prompt=request.prompt,
@@ -126,6 +158,12 @@ async def img2img(request: Img2ImgRequest):
         generator=generator,
     )
 
-    images = [pil_to_base64(img) for img in result.images]
+    images = [
+        pil_to_base64(img)
+        for img in result.images
+    ]
 
-    return {"images": images}
+    return {
+        "images": images
+    }
+```
