@@ -53,19 +53,13 @@ def load_model():
 
         hf_token = os.getenv("HF_TOKEN")
 
+        print("LOADING TXT2IMG")
+
         txt2img_pipe = FluxPipeline.from_pretrained(
             MODEL_ID,
             torch_dtype=torch.bfloat16,
             token=hf_token
         )
-
-        print("TXT2IMG PIPELINE LOADED")
-
-        img2img_pipe = FluxImg2ImgPipeline.from_pipe(
-            txt2img_pipe
-        )
-
-        print("IMG2IMG PIPELINE CREATED")
 
         txt2img_pipe.enable_model_cpu_offload()
 
@@ -76,9 +70,26 @@ def load_model():
             disable=True
         )
 
+        print("TXT2IMG READY")
+
+        print("LOADING IMG2IMG")
+
+        img2img_pipe = FluxImg2ImgPipeline.from_pretrained(
+            MODEL_ID,
+            torch_dtype=torch.bfloat16,
+            token=hf_token
+        )
+
+        img2img_pipe.enable_model_cpu_offload()
+
+        img2img_pipe.vae.enable_slicing()
+        img2img_pipe.vae.enable_tiling()
+
         img2img_pipe.set_progress_bar_config(
             disable=True
         )
+
+        print("IMG2IMG READY")
 
         model_loaded = True
         model_loading = False
@@ -145,6 +156,10 @@ async def generate(req: GenerateRequest):
                 "cuda"
             ).manual_seed(req.seed)
 
+        # =====================================
+        # IMAGE TO IMAGE
+        # =====================================
+
         if req.image_base64:
 
             image_data = base64.b64decode(
@@ -167,6 +182,10 @@ async def generate(req: GenerateRequest):
                 num_inference_steps=req.num_inference_steps,
                 generator=generator
             )
+
+        # =====================================
+        # TEXT TO IMAGE
+        # =====================================
 
         else:
 
