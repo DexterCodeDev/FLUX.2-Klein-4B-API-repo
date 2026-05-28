@@ -1,10 +1,10 @@
-# Upgrade to PyTorch 2.4+ to satisfy the new transformers requirements
+# Use PyTorch 2.4 to satisfy the transformers requirement
 FROM pytorch/pytorch:2.4.1-cuda12.1-cudnn9-runtime
 
-# Enable hf_transfer for blazing fast model downloads to beat the timeout
+# Enable Xet high-performance transfers to beat the Cloud Run startup timeout
 ENV PYTHONUNBUFFERED=1 \
     DEBIAN_FRONTEND=noninteractive \
-    HF_HUB_ENABLE_HF_TRANSFER=1
+    HF_XET_HIGH_PERFORMANCE=1
 
 WORKDIR /app
 
