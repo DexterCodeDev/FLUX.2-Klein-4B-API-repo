@@ -10,14 +10,6 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# --- NEW: Download weights into the Docker image ---
-# You will need to pass your HF token as a build argument
-ARG HF_TOKEN
-ENV HF_TOKEN=$HF_TOKEN
-
-RUN python -c "from huggingface_hub import snapshot_download; snapshot_download(repo_id='black-forest-labs/FLUX.2-klein-4B', token='$HF_TOKEN')"
-# ---------------------------------------------------
-
 COPY app.py .
 
 ENV PORT=8080
