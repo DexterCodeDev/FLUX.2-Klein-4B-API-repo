@@ -1,9 +1,9 @@
 __pycache__/
 *.pyc
-.env
-venv/
-env/
-.DS_Store
-.git/
+*.pyo
+*.pyd
+*.env
+.git
 .gitignore
-README.md
+Dockerfile
+docker-compose*
