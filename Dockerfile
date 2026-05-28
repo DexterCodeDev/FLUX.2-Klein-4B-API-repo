@@ -19,8 +19,6 @@ WORKDIR /app
 
 COPY requirements.txt .
 
-RUN pip3 install --break-system-packages --upgrade pip
-
 RUN pip3 install --break-system-packages --no-cache-dir \
     --index-url https://download.pytorch.org/whl/cu126 \
     torch torchvision
