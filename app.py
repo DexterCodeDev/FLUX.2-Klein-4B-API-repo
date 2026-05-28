@@ -1,6 +1,8 @@
 import os
 import io
 import base64
+import threading
+
 import torch
 
 from fastapi import FastAPI, HTTPException
@@ -14,6 +16,8 @@ MODEL_ID = "black-forest-labs/FLUX.2-klein-4B"
 app = FastAPI()
 
 pipe = None
+model_loading = False
+model_loaded = False
 
 
 class GenerateRequest(BaseModel):
@@ -27,14 +31,15 @@ class GenerateRequest(BaseModel):
     seed: int | None = None
 
 
-@app.on_event("startup")
-async def startup_event():
-    global pipe
+def load_model():
+    global pipe, model_loading, model_loaded
+
+    if model_loaded or model_loading:
+        return
+
+    model_loading = True
 
     hf_token = os.getenv("HF_TOKEN")
-
-    if not hf_token:
-        raise RuntimeError("HF_TOKEN environment variable missing")
 
     pipe = FluxImg2ImgPipeline.from_pretrained(
         MODEL_ID,
@@ -44,31 +49,55 @@ async def startup_event():
 
     pipe.enable_model_cpu_offload()
 
-    # Better performance on L4
     pipe.vae.enable_slicing()
     pipe.vae.enable_tiling()
 
     pipe.set_progress_bar_config(disable=True)
 
+    model_loaded = True
+    model_loading = False
+
+
+@app.on_event("startup")
+async def startup_event():
+    threading.Thread(target=load_model).start()
+
 
 @app.get("/")
 async def root():
-    return {"status": "ok"}
+    return {
+        "status": "ok",
+        "model_loaded": model_loaded,
+        "model_loading": model_loading,
+    }
 
 
 @app.post("/generate")
 async def generate(req: GenerateRequest):
     global pipe
 
+    if not model_loaded:
+        return {
+            "status": "loading_model"
+        }
+
     try:
         image_data = base64.b64decode(req.image_base64)
-        input_image = Image.open(io.BytesIO(image_data)).convert("RGB")
-        input_image = input_image.resize((req.width, req.height))
+
+        input_image = Image.open(
+            io.BytesIO(image_data)
+        ).convert("RGB")
+
+        input_image = input_image.resize(
+            (req.width, req.height)
+        )
 
         generator = None
 
         if req.seed is not None:
-            generator = torch.Generator("cuda").manual_seed(req.seed)
+            generator = torch.Generator(
+                "cuda"
+            ).manual_seed(req.seed)
 
         result = pipe(
             prompt=req.prompt,
@@ -84,13 +113,19 @@ async def generate(req: GenerateRequest):
         output_image = result.images[0]
 
         buffer = io.BytesIO()
+
         output_image.save(buffer, format="PNG")
 
-        output_base64 = base64.b64encode(buffer.getvalue()).decode()
+        output_base64 = base64.b64encode(
+            buffer.getvalue()
+        ).decode()
 
         return {
             "image_base64": output_base64
         }
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(
+            status_code=500,
+            detail=str(e)
+        )
