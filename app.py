@@ -1,70 +1,108 @@
 import os
+import io
+import base64
+from fastapi import FastAPI, File, UploadFile
+from pydantic import BaseModel
+from typing import Optional
+from PIL import Image
 import torch
-import gradio as gr
-from diffusers import Flux2KleinPipeline
+from diffusers import DiffusionPipeline
 
-# Activate high-speed Rust downloads to speed up the container boot time
-os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "1"
+HF_TOKEN = os.environ.get("HF_TOKEN")
+MODEL_ID = "black-forest-labs/FLUX.2-klein-4B"
 
-hf_token = os.environ.get("HF_TOKEN")
-model_id = "black-forest-labs/FLUX.2-klein-4B"
+app = FastAPI(title="FLUX.2-klein-4B CloudRun API")
 
-print("Loading Unified FLUX.2 Klein Pipeline...")
-# FLUX.2 Klein unifies generation and editing in a single pipeline
-pipe = Flux2KleinPipeline.from_pretrained(
-    model_id,
+# Load model once globally
+print("Loading FLUX.2-klein-4B model...")
+pipe = DiffusionPipeline.from_pretrained(
+    MODEL_ID,
     torch_dtype=torch.bfloat16,
-    token=hf_token
-).to("cuda")
+    use_auth_token=HF_TOKEN,
+    safety_checker=None
+)
+pipe.to("cuda")
+pipe.enable_xformers_memory_efficient_attention()
+print("Model loaded successfully.")
 
-def generate_image(prompt, reference_image, guidance_scale, steps):
-    if reference_image is None:
-        # Execute Text-to-Image
-        result = pipe(
-            prompt=prompt,
-            height=1024,
-            width=1024,
-            guidance_scale=guidance_scale,
-            num_inference_steps=steps,
-            generator=torch.Generator(device="cuda").manual_seed(0)
-        ).images[0]
-    else:
-        # Execute Image-to-Image by passing the image parameter
-        result = pipe(
-            prompt=prompt,
-            image=reference_image,
-            height=1024,
-            width=1024,
-            guidance_scale=guidance_scale,
-            num_inference_steps=steps,
-            generator=torch.Generator(device="cuda").manual_seed(0)
-        ).images[0]
-    return result
 
-with gr.Blocks(theme=gr.themes.Soft()) as app:
-    gr.Markdown("# FLUX.2 [Klein] 4B Studio")
-    gr.Markdown("Supports **Text-to-Image** and **Image-to-Image**. Upload an image below to switch to Image-to-Image mode.")
-    
-    with gr.Row():
-        with gr.Column():
-            prompt = gr.Textbox(label="Prompt", lines=3, placeholder="Describe what you want to generate...")
-            reference_image = gr.Image(label="Reference Image (Optional)", type="pil")
-            
-            with gr.Accordion("Advanced Settings", open=False):
-                guidance_scale = gr.Slider(label="Guidance Scale", minimum=1.0, maximum=10.0, value=1.0, step=0.1)
-                steps = gr.Slider(label="Inference Steps", minimum=1, maximum=50, value=4, step=1)
-                
-            generate_btn = gr.Button("Generate", variant="primary")
-            
-        with gr.Column():
-            output_image = gr.Image(label="Output Image")
-            
-    generate_btn.click(
-        fn=generate_image,
-        inputs=[prompt, reference_image, guidance_scale, steps],
-        outputs=output_image
-    )
+# ----------- Request Models -----------
 
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 8080))
-    app.launch(server_name="0.0.0.0", server_port=port)
+class Txt2ImgRequest(BaseModel):
+    prompt: str
+    negative_prompt: Optional[str] = ""
+    width: Optional[int] = 768
+    height: Optional[int] = 768
+    num_inference_steps: Optional[int] = 28
+    guidance_scale: Optional[float] = 7.5
+    seed: Optional[int] = None
+    num_images: Optional[int] = 1
+
+
+class Img2ImgRequest(BaseModel):
+    prompt: str
+    image_base64: str
+    strength: Optional[float] = 0.75
+    width: Optional[int] = 768
+    height: Optional[int] = 768
+    num_inference_steps: Optional[int] = 28
+    guidance_scale: Optional[float] = 7.5
+    seed: Optional[int] = None
+    num_images: Optional[int] = 1
+
+
+# ----------- Utility Function -----------
+
+def pil_to_base64(img: Image.Image) -> str:
+    buffered = io.BytesIO()
+    img.save(buffered, format="PNG")
+    return base64.b64encode(buffered.getvalue()).decode("utf-8")
+
+
+# ----------- Endpoints -----------
+
+@app.get("/health")
+async def health():
+    return {"status": "ok"}
+
+
+@app.post("/txt2img")
+async def txt2img(request: Txt2ImgRequest):
+    generator = torch.Generator("cuda")
+    if request.seed is not None:
+        generator = generator.manual_seed(request.seed)
+    images = pipe(
+        prompt=request.prompt,
+        negative_prompt=request.negative_prompt,
+        width=request.width,
+        height=request.height,
+        num_inference_steps=request.num_inference_steps,
+        guidance_scale=request.guidance_scale,
+        generator=generator,
+    ).images
+
+    base64_images = [pil_to_base64(img) for img in images]
+    return {"images": base64_images}
+
+
+@app.post("/img2img")
+async def img2img(request: Img2ImgRequest):
+    input_image = Image.open(io.BytesIO(base64.b64decode(request.image_base64))).convert("RGB")
+
+    generator = torch.Generator("cuda")
+    if request.seed is not None:
+        generator = generator.manual_seed(request.seed)
+
+    images = pipe(
+        prompt=request.prompt,
+        image=input_image,
+        strength=request.strength,
+        width=request.width,
+        height=request.height,
+        num_inference_steps=request.num_inference_steps,
+        guidance_scale=request.guidance_scale,
+        generator=generator,
+    ).images
+
+    base64_images = [pil_to_base64(img) for img in images]
+    return {"images": base64_images}
