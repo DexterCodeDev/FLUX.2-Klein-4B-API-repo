@@ -1,18 +1,11 @@
-fastapi
-uvicorn[standard]
+fastapi==0.116.1
+uvicorn[standard]==0.35.0
+pillow==11.3.0
+accelerate==1.9.0
+transformers==4.54.0
+sentencepiece==0.2.0
 
-torch
-torchvision
-torchaudio
+git+https://github.com/huggingface/diffusers.git
 
-diffusers
-transformers
-accelerate
-safetensors
-sentencepiece
-huggingface_hub
-
-pydantic>=2.0.0
-pydantic-settings>=2.0.0
-python-dotenv
-Pillow
+torch==2.8.0
+torchvision==0.23.0
