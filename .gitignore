@@ -1,16 +1,7 @@
 __pycache__/
 *.pyc
-*.pyo
-*.pyd
-*.db
-*.sqlite3
 .env
 venv/
-.venv/
 .cache/
-huggingface/
-tmp/
 .idea/
 .vscode/
-logs/
-*.log
