@@ -1,6 +1,13 @@
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
 .env
+.gcloud/
 *.log
-*.sqlite3
-.DS_Store
+models/
+*.safetensors
+*.bin
