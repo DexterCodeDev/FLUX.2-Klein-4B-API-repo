@@ -20,8 +20,8 @@ RUN pip3 install --no-cache-dir --upgrade pip
 
 COPY requirements.txt .
 
-# Force pip to find the exact CUDA 12.1 wheels for PyTorch first, then install the rest
-RUN pip3 install --no-cache-dir torch==2.4.1+cu121 --extra-index-url https://pytorch.org
+# Use PyTorch's native index url to pull the correct Linux CUDA binary
+RUN pip3 install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cu121
 RUN pip3 install --no-cache-dir -r requirements.txt
 
 # --- CI PIPELINE BUILD CACHING ---
