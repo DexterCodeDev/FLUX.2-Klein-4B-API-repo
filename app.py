@@ -32,8 +32,6 @@ pipe = DiffusionPipeline.from_pretrained(
 )
 
 pipe.to("cuda")
-
-# Reduce VRAM spikes
 pipe.enable_attention_slicing()
 
 print("Model loaded successfully.")
@@ -44,20 +42,20 @@ return pipe
 class Txt2ImgRequest(BaseModel):
 prompt: str
 negative_prompt: Optional[str] = ""
-width: Optional[int] = 768
-height: Optional[int] = 1024
-num_inference_steps: Optional[int] = 28
-guidance_scale: Optional[float] = 3.5
+width: int = 768
+height: int = 1024
+num_inference_steps: int = 28
+guidance_scale: float = 3.5
 seed: Optional[int] = None
 
 class Img2ImgRequest(BaseModel):
 prompt: str
 image_base64: str
-strength: Optional[float] = 0.75
-width: Optional[int] = 768
-height: Optional[int] = 1024
-num_inference_steps: Optional[int] = 28
-guidance_scale: Optional[float] = 3.5
+strength: float = 0.75
+width: int = 768
+height: int = 1024
+num_inference_steps: int = 28
+guidance_scale: float = 3.5
 seed: Optional[int] = None
 
 def pil_to_base64(image):
@@ -75,16 +73,16 @@ return {"status": "ok"}
 
 @app.post("/txt2img")
 async def txt2img(request: Txt2ImgRequest):
-pipe = load_model()
+pipe_instance = load_model()
 
 ```
 generator = None
 if request.seed is not None:
-    generator = torch.Generator("cuda").manual_seed(
+    generator = torch.Generator(device="cuda").manual_seed(
         request.seed
     )
 
-result = pipe(
+result = pipe_instance(
     prompt=request.prompt,
     negative_prompt=request.negative_prompt,
     width=request.width,
@@ -94,36 +92,32 @@ result = pipe(
     generator=generator,
 )
 
-images = [
-    pil_to_base64(img)
-    for img in result.images
-]
+images = []
 
-return {
-    "images": images
-}
+for img in result.images:
+    images.append(pil_to_base64(img))
+
+return {"images": images}
 ```
 
 @app.post("/img2img")
 async def img2img(request: Img2ImgRequest):
-pipe = load_model()
+pipe_instance = load_model()
 
 ```
 image = Image.open(
     io.BytesIO(
-        base64.b64decode(
-            request.image_base64
-        )
+        base64.b64decode(request.image_base64)
     )
 ).convert("RGB")
 
 generator = None
 if request.seed is not None:
-    generator = torch.Generator("cuda").manual_seed(
+    generator = torch.Generator(device="cuda").manual_seed(
         request.seed
     )
 
-result = pipe(
+result = pipe_instance(
     prompt=request.prompt,
     image=image,
     strength=request.strength,
@@ -134,12 +128,10 @@ result = pipe(
     generator=generator,
 )
 
-images = [
-    pil_to_base64(img)
-    for img in result.images
-]
+images = []
 
-return {
-    "images": images
-}
+for img in result.images:
+    images.append(pil_to_base64(img))
+
+return {"images": images}
 ```
