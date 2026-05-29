@@ -16,122 +16,124 @@ app = FastAPI(title="FLUX.2 Klein API")
 
 pipe = None
 
-def load_model():
-global pipe
 
-```
-if pipe is not None:
+def load_model():
+    global pipe
+
+    if pipe is not None:
+        return pipe
+
+    print("Loading FLUX.2-klein-4B model...")
+
+    pipe = DiffusionPipeline.from_pretrained(
+        MODEL_ID,
+        token=HF_TOKEN,
+        torch_dtype=torch.bfloat16,
+    )
+
+    pipe.to("cuda")
+    pipe.enable_attention_slicing()
+
+    print("Model loaded successfully.")
+
     return pipe
 
-print("Loading FLUX.2-klein-4B model...")
-
-pipe = DiffusionPipeline.from_pretrained(
-    MODEL_ID,
-    token=HF_TOKEN,
-    torch_dtype=torch.bfloat16,
-)
-
-pipe.to("cuda")
-pipe.enable_attention_slicing()
-
-print("Model loaded successfully.")
-
-return pipe
-```
 
 class Txt2ImgRequest(BaseModel):
-prompt: str
-negative_prompt: Optional[str] = ""
-width: int = 768
-height: int = 1024
-num_inference_steps: int = 28
-guidance_scale: float = 3.5
-seed: Optional[int] = None
+    prompt: str
+    negative_prompt: Optional[str] = ""
+    width: int = 768
+    height: int = 1024
+    num_inference_steps: int = 28
+    guidance_scale: float = 3.5
+    seed: Optional[int] = None
+
 
 class Img2ImgRequest(BaseModel):
-prompt: str
-image_base64: str
-strength: float = 0.75
-width: int = 768
-height: int = 1024
-num_inference_steps: int = 28
-guidance_scale: float = 3.5
-seed: Optional[int] = None
+    prompt: str
+    image_base64: str
+    strength: float = 0.75
+    width: int = 768
+    height: int = 1024
+    num_inference_steps: int = 28
+    guidance_scale: float = 3.5
+    seed: Optional[int] = None
+
 
 def pil_to_base64(image):
-buffer = io.BytesIO()
-image.save(buffer, format="PNG")
-return base64.b64encode(buffer.getvalue()).decode("utf-8")
+    buffer = io.BytesIO()
+    image.save(buffer, format="PNG")
+    return base64.b64encode(buffer.getvalue()).decode("utf-8")
+
 
 @app.get("/")
 async def root():
-return {"status": "running"}
+    return {"status": "running"}
+
 
 @app.get("/health")
 async def health():
-return {"status": "ok"}
+    return {"status": "ok"}
+
 
 @app.post("/txt2img")
 async def txt2img(request: Txt2ImgRequest):
-pipe_instance = load_model()
+    pipe_instance = load_model()
 
-```
-generator = None
-if request.seed is not None:
-    generator = torch.Generator(device="cuda").manual_seed(
-        request.seed
+    generator = None
+    if request.seed is not None:
+        generator = torch.Generator(device="cuda").manual_seed(
+            request.seed
+        )
+
+    result = pipe_instance(
+        prompt=request.prompt,
+        negative_prompt=request.negative_prompt,
+        width=request.width,
+        height=request.height,
+        guidance_scale=request.guidance_scale,
+        num_inference_steps=request.num_inference_steps,
+        generator=generator,
     )
 
-result = pipe_instance(
-    prompt=request.prompt,
-    negative_prompt=request.negative_prompt,
-    width=request.width,
-    height=request.height,
-    guidance_scale=request.guidance_scale,
-    num_inference_steps=request.num_inference_steps,
-    generator=generator,
-)
+    images = []
 
-images = []
+    for img in result.images:
+        images.append(pil_to_base64(img))
 
-for img in result.images:
-    images.append(pil_to_base64(img))
+    return {"images": images}
 
-return {"images": images}
-```
 
 @app.post("/img2img")
 async def img2img(request: Img2ImgRequest):
-pipe_instance = load_model()
+    pipe_instance = load_model()
 
-```
-image = Image.open(
-    io.BytesIO(
-        base64.b64decode(request.image_base64)
+    image = Image.open(
+        io.BytesIO(
+            base64.b64decode(request.image_base64)
+        )
+    ).convert("RGB")
+
+    generator = None
+    if request.seed is not None:
+        generator = torch.Generator(device="cuda").manual_seed(
+            request.seed
+        )
+
+    result = pipe_instance(
+        prompt=request.prompt,
+        image=image,
+        strength=request.strength,
+        width=request.width,
+        height=request.height,
+        guidance_scale=request.guidance_scale,
+        num_inference_steps=request.num_inference_steps,
+        generator=generator,
     )
-).convert("RGB")
 
-generator = None
-if request.seed is not None:
-    generator = torch.Generator(device="cuda").manual_seed(
-        request.seed
-    )
+    images = []
 
-result = pipe_instance(
-    prompt=request.prompt,
-    image=image,
-    strength=request.strength,
-    width=request.width,
-    height=request.height,
-    guidance_scale=request.guidance_scale,
-    num_inference_steps=request.num_inference_steps,
-    generator=generator,
-)
+    for img in result.images:
+        images.append(pil_to_base64(img))
 
-images = []
-
-for img in result.images:
-    images.append(pil_to_base64(img))
-
-return {"images": images}
-```
+    return {"images": images}
