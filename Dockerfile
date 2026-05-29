@@ -28,13 +28,8 @@ RUN pip3 install --no-cache-dir -r requirements.txt
 ARG HF_TOKEN
 ENV HF_TOKEN=${HF_TOKEN}
 
-# Pull down the unified pipeline architecture weights natively during deployment builds
-RUN python3 -c " \
-import os; \
-from diffusers import DiffusionPipeline; \
-import torch; \
-DiffusionPipeline.from_pretrained('black-forest-labs/FLUX.2-klein-4B', torch_dtype=torch.bfloat16, token=os.getenv('HF_TOKEN')) \
-"
+# Flattened python string execution to guarantee no indentation errors
+RUN python3 -c "import os; from diffusers import DiffusionPipeline; import torch; DiffusionPipeline.from_pretrained('black-forest-labs/FLUX.2-klein-4B', torch_dtype=torch.bfloat16, token=os.getenv('HF_TOKEN'))"
 # ----------------------------------
 
 COPY app.py .
