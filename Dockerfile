@@ -20,8 +20,10 @@ RUN pip3 install --no-cache-dir --upgrade pip
 
 COPY requirements.txt .
 
-# FIX: Using the correct, fully-qualified PyTorch storage mirror path
-RUN pip3 install --no-cache-dir torch --index-url https://pytorch.org
+# BYPASS INDEX ENTIRELY: Directly download and install the exact Python 3.10 CUDA 12.1 stable wheel
+RUN pip3 install --no-cache-dir https://pytorch.org
+
+# Install the rest of your requirements
 RUN pip3 install --no-cache-dir -r requirements.txt
 
 # --- CI PIPELINE BUILD CACHING ---
@@ -37,5 +39,3 @@ COPY app.py .
 EXPOSE 8080
 
 CMD uvicorn app:app --host 0.0.0.0 --port ${PORT}
-
-
