@@ -9,7 +9,6 @@ accelerate==1.7.0
 fastapi==0.115.12
 uvicorn[standard]==0.34.2
 
-huggingface_hub==0.32.4
 safetensors==0.5.3
 sentencepiece==0.2.0
 
