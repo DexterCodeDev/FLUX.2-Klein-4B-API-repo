@@ -1,6 +1,7 @@
 import io
 import os
 import base64
+import threading
 import torch
 
 from PIL import Image
@@ -23,21 +24,12 @@ if not HF_TOKEN:
 login(token=HF_TOKEN)
 
 # =========================================================
-# LOAD MODEL
+# GLOBALS
 # =========================================================
 
-print("Loading model...")
-
-pipe = DiffusionPipeline.from_pretrained(
-    MODEL_ID,
-    torch_dtype=torch.bfloat16,
-    trust_remote_code=True,
-)
-
-pipe.enable_model_cpu_offload()
-pipe.enable_attention_slicing()
-
-print("Model loaded successfully")
+pipe = None
+model_loading = True
+model_error = None
 
 # =========================================================
 # FASTAPI
@@ -45,6 +37,10 @@ print("Model loaded successfully")
 
 app = FastAPI(title="FLUX.2-klein-4B API")
 
+
+# =========================================================
+# REQUEST MODELS
+# =========================================================
 
 class GenerateRequest(BaseModel):
     prompt: str
@@ -63,22 +59,82 @@ class EditRequest(BaseModel):
     seed: int | None = None
 
 
+# =========================================================
+# HELPERS
+# =========================================================
+
 def pil_to_base64(image: Image.Image):
     buffer = io.BytesIO()
     image.save(buffer, format="PNG")
     return base64.b64encode(buffer.getvalue()).decode("utf-8")
 
 
+# =========================================================
+# MODEL LOADER
+# =========================================================
+
+def load_model():
+    global pipe
+    global model_loading
+    global model_error
+
+    try:
+        print("Loading model...")
+
+        pipe = DiffusionPipeline.from_pretrained(
+            MODEL_ID,
+            torch_dtype=torch.bfloat16,
+            trust_remote_code=True,
+        )
+
+        pipe.enable_model_cpu_offload()
+        pipe.enable_attention_slicing()
+
+        print("Model loaded successfully")
+
+        model_loading = False
+
+    except Exception as e:
+        model_error = str(e)
+        model_loading = False
+        print(f"MODEL LOAD ERROR: {e}")
+
+
+# =========================================================
+# START BACKGROUND MODEL LOADING
+# =========================================================
+
+threading.Thread(target=load_model, daemon=True).start()
+
+
+# =========================================================
+# ROUTES
+# =========================================================
+
 @app.get("/")
 def root():
     return {
         "status": "running",
-        "model": MODEL_ID
+        "model_loaded": pipe is not None,
+        "loading": model_loading,
+        "error": model_error
     }
 
 
 @app.get("/health")
 def health():
+
+    if model_error:
+        return {
+            "status": "error",
+            "error": model_error
+        }
+
+    if model_loading:
+        return {
+            "status": "loading"
+        }
+
     return {
         "status": "healthy"
     }
@@ -86,6 +142,18 @@ def health():
 
 @app.post("/generate")
 def generate(req: GenerateRequest):
+
+    if model_loading:
+        raise HTTPException(
+            status_code=503,
+            detail="Model still loading"
+        )
+
+    if model_error:
+        raise HTTPException(
+            status_code=500,
+            detail=model_error
+        )
 
     try:
         generator = None
@@ -112,6 +180,18 @@ def generate(req: GenerateRequest):
 
 @app.post("/edit")
 def edit(req: EditRequest):
+
+    if model_loading:
+        raise HTTPException(
+            status_code=503,
+            detail="Model still loading"
+        )
+
+    if model_error:
+        raise HTTPException(
+            status_code=500,
+            detail=model_error
+        )
 
     try:
         image_data = base64.b64decode(req.image_base64)
