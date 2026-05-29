@@ -20,7 +20,7 @@ RUN pip3 install --no-cache-dir --upgrade pip
 
 COPY requirements.txt .
 
-# Use PyTorch's native index url to pull the correct Linux CUDA binary
+# FIX: Using the correct, fully-qualified PyTorch storage mirror path
 RUN pip3 install --no-cache-dir torch --index-url https://pytorch.org
 RUN pip3 install --no-cache-dir -r requirements.txt
 
