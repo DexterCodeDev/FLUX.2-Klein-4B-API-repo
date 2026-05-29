@@ -1,4 +1,4 @@
-# Optimized for CUDA 12.1 Execution
+# Optimized for CUDA 12.1 Execution on NVIDIA L4
 FROM nvidia/cuda:12.1.1-runtime-ubuntu22.04
 
 ENV DEBIAN_FRONTEND=noninteractive
@@ -15,7 +15,13 @@ RUN apt-get update && apt-get install -y \
     git-lfs \
     && rm -rf /var/lib/apt/lists/*
 
+# Upgrade pip first to ensure modern wheel support
+RUN pip3 install --no-cache-dir --upgrade pip
+
 COPY requirements.txt .
+
+# Force pip to find the exact CUDA 12.1 wheels for PyTorch first, then install the rest
+RUN pip3 install --no-cache-dir torch==2.4.1+cu121 --extra-index-url https://pytorch.org
 RUN pip3 install --no-cache-dir -r requirements.txt
 
 # --- CI PIPELINE BUILD CACHING ---
