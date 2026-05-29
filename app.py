@@ -7,7 +7,6 @@ from PIL import Image
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from diffusers import DiffusionPipeline
-from diffusers.utils import load_image
 from huggingface_hub import login
 
 # =========================================================
@@ -32,10 +31,10 @@ print("Loading model...")
 pipe = DiffusionPipeline.from_pretrained(
     MODEL_ID,
     torch_dtype=torch.bfloat16,
+    trust_remote_code=True,
 )
 
-pipe.to("cuda")
-
+pipe.enable_model_cpu_offload()
 pipe.enable_attention_slicing()
 
 print("Model loaded successfully")
@@ -67,7 +66,7 @@ class EditRequest(BaseModel):
 def pil_to_base64(image: Image.Image):
     buffer = io.BytesIO()
     image.save(buffer, format="PNG")
-    return base64.b64encode(buffer.getvalue()).decode()
+    return base64.b64encode(buffer.getvalue()).decode("utf-8")
 
 
 @app.get("/")
@@ -78,26 +77,37 @@ def root():
     }
 
 
+@app.get("/health")
+def health():
+    return {
+        "status": "healthy"
+    }
+
+
 @app.post("/generate")
 def generate(req: GenerateRequest):
 
-    generator = None
+    try:
+        generator = None
 
-    if req.seed is not None:
-        generator = torch.Generator("cuda").manual_seed(req.seed)
+        if req.seed is not None:
+            generator = torch.Generator("cpu").manual_seed(req.seed)
 
-    image = pipe(
-        prompt=req.prompt,
-        width=req.width,
-        height=req.height,
-        num_inference_steps=req.steps,
-        guidance_scale=req.guidance_scale,
-        generator=generator,
-    ).images[0]
+        image = pipe(
+            prompt=req.prompt,
+            width=req.width,
+            height=req.height,
+            num_inference_steps=req.steps,
+            guidance_scale=req.guidance_scale,
+            generator=generator,
+        ).images[0]
 
-    return {
-        "image": pil_to_base64(image)
-    }
+        return {
+            "image": pil_to_base64(image)
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/edit")
@@ -110,19 +120,23 @@ def edit(req: EditRequest):
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid image")
 
-    generator = None
+    try:
+        generator = None
 
-    if req.seed is not None:
-        generator = torch.Generator("cuda").manual_seed(req.seed)
+        if req.seed is not None:
+            generator = torch.Generator("cpu").manual_seed(req.seed)
 
-    image = pipe(
-        prompt=req.prompt,
-        image=input_image,
-        num_inference_steps=req.steps,
-        guidance_scale=req.guidance_scale,
-        generator=generator,
-    ).images[0]
+        image = pipe(
+            prompt=req.prompt,
+            image=input_image,
+            num_inference_steps=req.steps,
+            guidance_scale=req.guidance_scale,
+            generator=generator,
+        ).images[0]
 
-    return {
-        "image": pil_to_base64(image)
-    }
+        return {
+            "image": pil_to_base64(image)
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
