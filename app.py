@@ -1,93 +1,128 @@
-import os
 import io
-import torch
+import os
 import base64
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import Response
-from pydantic import BaseModel
-from typing import Optional
+import torch
+
 from PIL import Image
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
 from diffusers import DiffusionPipeline
+from diffusers.utils import load_image
+from huggingface_hub import login
 
-app = FastAPI(title="FLUX.2-klein-4B Unified Pipeline API")
+# =========================================================
+# CONFIG
+# =========================================================
 
-# Global pipeline object
-pipe = None
+MODEL_ID = "black-forest-labs/FLUX.2-klein-4B"
 
-class GenerationRequest(BaseModel):
+HF_TOKEN = os.getenv("HF_TOKEN")
+
+if not HF_TOKEN:
+    raise RuntimeError("HF_TOKEN environment variable not found")
+
+login(token=HF_TOKEN)
+
+# =========================================================
+# LOAD MODEL
+# =========================================================
+
+print("Loading model...")
+
+pipe = DiffusionPipeline.from_pretrained(
+    MODEL_ID,
+    torch_dtype=torch.bfloat16,
+)
+
+pipe.to("cuda")
+
+pipe.enable_attention_slicing()
+
+print("Model loaded successfully")
+
+# =========================================================
+# FASTAPI
+# =========================================================
+
+app = FastAPI(title="FLUX.2-klein-4B API")
+
+
+class GenerateRequest(BaseModel):
     prompt: str
-    image_b64: Optional[str] = None  # Providing this triggers Image-to-Image mode
-    strength: Optional[float] = 0.6  # Control over image changes (0.0 to 1.0)
-    num_inference_steps: int = 4     # FLUX.2 Klein is 4-step distilled
-    guidance_scale: float = 0.0      # Default for distilled variants
+    width: int = 1024
+    height: int = 1024
+    steps: int = 4
+    guidance_scale: float = 1.0
+    seed: int | None = None
 
-@app.on_event("startup")
-def load_model():
-    global pipe
-    model_id = "black-forest-labs/FLUX.2-klein-4B"
-    hf_token = os.getenv("HF_TOKEN")
-    
-    try:
-        print("Loading Unified FLUX.2 [klein] 4B Pipeline onto L4 GPU...")
-        # Using unified DiffusionPipeline to natively handle both modes dynamically
-        pipe = DiffusionPipeline.from_pretrained(
-            model_id, 
-            torch_dtype=torch.bfloat16, 
-            token=hf_token
-        )
-        pipe.to("cuda")
-        print("Pipeline initialized successfully!")
-    except Exception as e:
-        print(f"Error loading model: {str(e)}")
-        raise e
+
+class EditRequest(BaseModel):
+    prompt: str
+    image_base64: str
+    steps: int = 4
+    guidance_scale: float = 1.0
+    seed: int | None = None
+
+
+def pil_to_base64(image: Image.Image):
+    buffer = io.BytesIO()
+    image.save(buffer, format="PNG")
+    return base64.b64encode(buffer.getvalue()).decode()
+
+
+@app.get("/")
+def root():
+    return {
+        "status": "running",
+        "model": MODEL_ID
+    }
+
 
 @app.post("/generate")
-async def generate(request: GenerationRequest):
-    global pipe
-    if pipe is None:
-        raise HTTPException(status_code=503, detail="Model is still loading.")
-    
+def generate(req: GenerateRequest):
+
+    generator = None
+
+    if req.seed is not None:
+        generator = torch.Generator("cuda").manual_seed(req.seed)
+
+    image = pipe(
+        prompt=req.prompt,
+        width=req.width,
+        height=req.height,
+        num_inference_steps=req.steps,
+        guidance_scale=req.guidance_scale,
+        generator=generator,
+    ).images[0]
+
+    return {
+        "image": pil_to_base64(image)
+    }
+
+
+@app.post("/edit")
+def edit(req: EditRequest):
+
     try:
-        # Dictionary to store arguments dynamically
-        pipeline_kwargs = {
-            "prompt": request.prompt,
-            "num_inference_steps": request.num_inference_steps,
-            "guidance_scale": request.guidance_scale,
-            "generator": torch.Generator("cuda")
-        }
-        
-        # Determine execution flow: Image-to-Image vs Text-to-Image
-        if request.image_b64:
-            print("Processing Mode: Image-to-Image")
-            try:
-                # Clear standard base64 headers if present (e.g. data:image/jpeg;base64,...)
-                header_offset = request.image_b64.find(",") + 1 if "," in request.image_b64 else 0
-                image_data = base64.b64decode(request.image_b64[header_offset:])
-                input_image = Image.open(io.BytesIO(image_data)).convert("RGB")
-                
-                # Append image-specific inputs to unified pipeline execution
-                pipeline_kwargs["image"] = input_image
-                pipeline_kwargs["strength"] = request.strength
-            except Exception as img_err:
-                raise HTTPException(status_code=400, detail=f"Invalid base64 image data: {str(img_err)}")
-        else:
-            print("Processing Mode: Text-to-Image")
+        image_data = base64.b64decode(req.image_base64)
+        input_image = Image.open(io.BytesIO(image_data)).convert("RGB")
 
-        # Run inference using unified memory spaces 
-        with torch.inference_mode():
-            output = pipe(**pipeline_kwargs).images[0]
-        
-        # Save output image to byte buffer
-        buffer = io.BytesIO()
-        output.save(buffer, format="JPEG")
-        buffer.seek(0)
-        
-        # Return as image stream
-        return Response(content=buffer.getvalue(), media_type="image/jpeg")
-        
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Pipeline execution failed: {str(e)}")
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid image")
 
-@app.get("/health")
-def health_check():
-    return {"status": "healthy", "gpu_active": torch.cuda.is_available()}
+    generator = None
+
+    if req.seed is not None:
+        generator = torch.Generator("cuda").manual_seed(req.seed)
+
+    image = pipe(
+        prompt=req.prompt,
+        image=input_image,
+        num_inference_steps=req.steps,
+        guidance_scale=req.guidance_scale,
+        generator=generator,
+    ).images[0]
+
+    return {
+        "image": pil_to_base64(image)
+    }
