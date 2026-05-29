@@ -1,139 +1,93 @@
 import os
 import io
-import base64
-from typing import Optional
-
 import torch
-from fastapi import FastAPI
+import base64
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import Response
 from pydantic import BaseModel
+from typing import Optional
 from PIL import Image
 from diffusers import DiffusionPipeline
 
-MODEL_ID = "black-forest-labs/FLUX.2-klein-4B"
-HF_TOKEN = os.getenv("HF_TOKEN")
+app = FastAPI(title="FLUX.2-klein-4B Unified Pipeline API")
 
-app = FastAPI(title="FLUX.2 Klein API")
-
+# Global pipeline object
 pipe = None
 
+class GenerationRequest(BaseModel):
+    prompt: str
+    image_b64: Optional[str] = None  # Providing this triggers Image-to-Image mode
+    strength: Optional[float] = 0.6  # Control over image changes (0.0 to 1.0)
+    num_inference_steps: int = 4     # FLUX.2 Klein is 4-step distilled
+    guidance_scale: float = 0.0      # Default for distilled variants
 
+@app.on_event("startup")
 def load_model():
     global pipe
+    model_id = "black-forest-labs/FLUX.2-klein-4B"
+    hf_token = os.getenv("HF_TOKEN")
+    
+    try:
+        print("Loading Unified FLUX.2 [klein] 4B Pipeline onto L4 GPU...")
+        # Using unified DiffusionPipeline to natively handle both modes dynamically
+        pipe = DiffusionPipeline.from_pretrained(
+            model_id, 
+            torch_dtype=torch.bfloat16, 
+            token=hf_token
+        )
+        pipe.to("cuda")
+        print("Pipeline initialized successfully!")
+    except Exception as e:
+        print(f"Error loading model: {str(e)}")
+        raise e
 
-    if pipe is not None:
-        return pipe
+@app.post("/generate")
+async def generate(request: GenerationRequest):
+    global pipe
+    if pipe is None:
+        raise HTTPException(status_code=503, detail="Model is still loading.")
+    
+    try:
+        # Dictionary to store arguments dynamically
+        pipeline_kwargs = {
+            "prompt": request.prompt,
+            "num_inference_steps": request.num_inference_steps,
+            "guidance_scale": request.guidance_scale,
+            "generator": torch.Generator("cuda")
+        }
+        
+        # Determine execution flow: Image-to-Image vs Text-to-Image
+        if request.image_b64:
+            print("Processing Mode: Image-to-Image")
+            try:
+                # Clear standard base64 headers if present (e.g. data:image/jpeg;base64,...)
+                header_offset = request.image_b64.find(",") + 1 if "," in request.image_b64 else 0
+                image_data = base64.b64decode(request.image_b64[header_offset:])
+                input_image = Image.open(io.BytesIO(image_data)).convert("RGB")
+                
+                # Append image-specific inputs to unified pipeline execution
+                pipeline_kwargs["image"] = input_image
+                pipeline_kwargs["strength"] = request.strength
+            except Exception as img_err:
+                raise HTTPException(status_code=400, detail=f"Invalid base64 image data: {str(img_err)}")
+        else:
+            print("Processing Mode: Text-to-Image")
 
-    print("Loading FLUX.2-klein-4B model...")
-
-    pipe = DiffusionPipeline.from_pretrained(
-        MODEL_ID,
-        token=HF_TOKEN,
-        torch_dtype=torch.bfloat16,
-    )
-
-    pipe.to("cuda")
-    pipe.enable_attention_slicing()
-
-    print("Model loaded successfully.")
-
-    return pipe
-
-
-class Txt2ImgRequest(BaseModel):
-    prompt: str
-    negative_prompt: Optional[str] = ""
-    width: int = 768
-    height: int = 1024
-    num_inference_steps: int = 28
-    guidance_scale: float = 3.5
-    seed: Optional[int] = None
-
-
-class Img2ImgRequest(BaseModel):
-    prompt: str
-    image_base64: str
-    strength: float = 0.75
-    width: int = 768
-    height: int = 1024
-    num_inference_steps: int = 28
-    guidance_scale: float = 3.5
-    seed: Optional[int] = None
-
-
-def pil_to_base64(image):
-    buffer = io.BytesIO()
-    image.save(buffer, format="PNG")
-    return base64.b64encode(buffer.getvalue()).decode("utf-8")
-
-
-@app.get("/")
-async def root():
-    return {"status": "running"}
-
+        # Run inference using unified memory spaces 
+        with torch.inference_mode():
+            output = pipe(**pipeline_kwargs).images[0]
+        
+        # Save output image to byte buffer
+        buffer = io.BytesIO()
+        output.save(buffer, format="JPEG")
+        buffer.seek(0)
+        
+        # Return as image stream
+        return Response(content=buffer.getvalue(), media_type="image/jpeg")
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Pipeline execution failed: {str(e)}")
 
 @app.get("/health")
-async def health():
-    return {"status": "ok"}
-
-
-@app.post("/txt2img")
-async def txt2img(request: Txt2ImgRequest):
-    pipe_instance = load_model()
-
-    generator = None
-    if request.seed is not None:
-        generator = torch.Generator(device="cuda").manual_seed(
-            request.seed
-        )
-
-    result = pipe_instance(
-        prompt=request.prompt,
-        negative_prompt=request.negative_prompt,
-        width=request.width,
-        height=request.height,
-        guidance_scale=request.guidance_scale,
-        num_inference_steps=request.num_inference_steps,
-        generator=generator,
-    )
-
-    images = []
-
-    for img in result.images:
-        images.append(pil_to_base64(img))
-
-    return {"images": images}
-
-
-@app.post("/img2img")
-async def img2img(request: Img2ImgRequest):
-    pipe_instance = load_model()
-
-    image = Image.open(
-        io.BytesIO(
-            base64.b64decode(request.image_base64)
-        )
-    ).convert("RGB")
-
-    generator = None
-    if request.seed is not None:
-        generator = torch.Generator(device="cuda").manual_seed(
-            request.seed
-        )
-
-    result = pipe_instance(
-        prompt=request.prompt,
-        image=image,
-        strength=request.strength,
-        width=request.width,
-        height=request.height,
-        guidance_scale=request.guidance_scale,
-        num_inference_steps=request.num_inference_steps,
-        generator=generator,
-    )
-
-    images = []
-
-    for img in result.images:
-        images.append(pil_to_base64(img))
-
-    return {"images": images}
+def health_check():
+    return {"status": "healthy", "gpu_active": torch.cuda.is_available()}
