@@ -4,14 +4,15 @@ torchaudio==2.7.1
 
 git+https://github.com/huggingface/diffusers.git
 
-transformers==4.52.4
-accelerate==1.7.0
+transformers
+accelerate
 
-fastapi==0.115.12
-uvicorn[standard]==0.34.2
+fastapi
+uvicorn[standard]
 
-safetensors==0.5.3
-sentencepiece==0.2.0
+huggingface_hub
+safetensors
+sentencepiece
 
-Pillow==11.2.1
-python-multipart==0.0.20
+Pillow
+python-multipart
